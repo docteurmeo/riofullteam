@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rolling Circles — Figma test</title>
+<style>
+  :root { --s: 1; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; }
+
+  /* Fixed 1920x1080 design space, scaled uniformly to fit the viewport */
+  #frame {
+    position: absolute;
+    width: 1920px; height: 1080px;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(var(--s));
+    transform-origin: center center;
+    background: #000;
+  }
+
+  #scene { position: absolute; inset: 0; width: 1920px; height: 1080px; display: block; -webkit-user-drag: none; }
+  #overlay { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: visible; }
+
+  /* The two vectors are only motion guides — kept in the DOM for path math but
+     never shown in the final output. */
+  .track { fill: none; stroke: none; }
+
+  .ball {
+    position: absolute;
+    left: 0; top: 0;
+    width: 88px; height: 88px;
+    border-radius: 50%;
+    background-size: cover;
+    background-position: center;
+    will-change: transform;
+    opacity: 0;
+    transition: opacity .35s ease;
+    box-shadow: 0 10px 22px rgba(0,0,0,0.55);
+  }
+  #b1 { background-image: url('assets/circle1.png'); }
+  #b2 { background-image: url('assets/circle2.png'); }
+  #b3 { background-image: url('assets/circle3.png'); }
+  #b4 { background-image: url('assets/circle4.png'); }
+
+  /* Circle 4 is a "ghost": it doesn't roll, it drifts and fades in/out. Its
+     opacity/transform are driven every frame in JS, so no CSS transition here. */
+  .ghost { transition: none; box-shadow: none; filter: blur(0.4px) drop-shadow(0 0 22px rgba(255,255,255,0.25)); }
+</style>
+</head>
+<body>
+  <div id="frame">
+    <img id="scene" src="assets/scene.png" alt="scene">
+    <svg id="overlay" viewBox="0 0 1920 1080">
+      <!-- Vector 1 : the roll ramp -->
+      <path id="track1" class="track" transform="translate(1245,198)"
+        d="M 511 0 C 479.5 0 460.5 1 448 6.5 C 435.5 12 413 19.5 406 19.5 C 399 19.5 394.812 16.782 385.406 18.891 C 376 21 370 17.5 368.5 21 C 367 24.5 364.5 36.5 353.5 43 C 342.5 49.5 340 51.5 332.5 51.5 C 325 51.5 324.5 50 318.5 53 C 312.5 56 309.5 55 308 57.5 C 306.5 60 301 65 299.5 68.5 C 298 72 289.5 77 289 79 C 288.5 81 282.5 83.5 279 82.5 C 275.5 81.5 269 80.5 264.5 81.5 C 260 82.5 249.5 87.5 240.5 91 C 231.5 94.5 213 104.5 202 107 C 191 109.5 185 105 177 104 C 169 103 160 100 156.5 99.5 C 153 99 151.5 99.5 151.5 102.5 C 151.5 105.5 155 110.5 141.5 118 C 128 125.5 116.5 133 105.5 133 C 94.5 133 78.5 135 80 139 C 81.5 143 88 151 76.5 157 C 65 163 62 169 49.5 167.5 C 37 166 36.5 170.5 27.5 169 C 18.5 167.5 15 163 11.5 170 C 8 177 0.5 193.5 0 195" />
+      <!-- Vector 2 : the basket that catches the circles -->
+      <path id="track2" class="track" transform="translate(738.5,669.5)"
+        d="M 30 0 C 31.5 8 33.5 12.5 35 15.5 C 36.5 18.5 37 23.5 36 28.5 C 35 33.5 32.5 38 32.5 44.5 C 32.5 51 31 61.5 28 66.5 C 26.5 75.5 25.5 92 22.5 101 C 19.5 110 17.5 116.5 17.5 120.5 C 17.5 124.5 17 125.5 12.5 129.5 C 8.9 132.7 2.667 139.5 0 142.5 C 2.167 142.5 7.1 142.5 9.5 142.5 C 12.5 142.5 14.5 143 14 146.5 C 13.5 150 13 154.5 16.5 155 C 20 155.5 25 157 30.5 158 C 36 159 38 161 41 160.5 C 44 160 46.5 160 50.5 161.5 C 54.5 163 62.5 163.5 68.5 162.5 C 74.5 161.5 74 154.5 78 157 C 82 159.5 89.5 160 97 162.5 C 104.5 165 110.5 168.5 113.5 171.5 C 116.5 174.5 123.5 174 125 169.5 C 126.5 165 128.5 170 136 168.5 C 143.5 167 153 162.5 162 161.5 C 171 160.5 196 159.5 208.5 160 C 221 160.5 230 162 232.5 161 C 235 160 232.5 145 241 140.5 C 249.5 136 258.5 135.5 259 135.5 C 259.5 135.5 254 104 254.5 88.5 C 255 73 257.5 68.5 255 59.5 C 252.5 50.5 250 48 250.5 41 C 250.9 35.4 251.333 27.667 251.5 24.5" />
+    </svg>
+    <div class="ball" id="b1"></div>
+    <div class="ball" id="b2"></div>
+    <div class="ball" id="b3"></div>
+    <div class="ball ghost" id="b4"></div>
+  </div>
+
+<script>
+(function () {
+  const SIZE = 88, R = SIZE / 2, RAD2DEG = 180 / Math.PI;
+
+  // ---- a path in frame-space, with a real-ball smoothing model ----
+  // A ball of radius R can't drop into crevices smaller than itself: it bridges
+  // small bumps. We model that by averaging the raw path over a short window,
+  // which removes jitter on the busy sections while keeping the larger bumps.
+  function Track(id, ox, oy, smooth) {
+    const el = document.getElementById(id);
+    const total = el.getTotalLength();
+    function raw(l) {
+      l = Math.max(0, Math.min(total, l));
+      const p = el.getPointAtLength(l);
+      return { x: p.x + ox, y: p.y + oy };
+    }
+    function point(l) {
+      if (!smooth) return raw(l);
+      let sx = 0, sy = 0, n = 0;
+      for (let d = -smooth; d <= smooth; d += 5) { const p = raw(l + d); sx += p.x; sy += p.y; n++; }
+      return { x: sx / n, y: sy / n };
+    }
+    function tangent(l) {
+      const a = point(l - 8), b = point(l + 8);
+      let tx = b.x - a.x, ty = b.y - a.y;
+      const m = Math.hypot(tx, ty) || 1;
+      return { x: tx / m, y: ty / m };          // direction of travel; ty>0 = downhill
+    }
+    function normalUp(l) {
+      const t = tangent(l);
+      let nx = -t.y, ny = t.x;
+      if (ny > 0) { nx = -nx; ny = -ny; }        // screen-up so the ball rests on top
+      return { x: nx, y: ny };
+    }
+    function center(l) { const p = point(l), n = normalUp(l); return { x: p.x + n.x * R, y: p.y + n.y * R }; }
+    return { el, total, raw, point, tangent, normalUp, center };
+  }
+
+  const ramp   = Track('track1', 1245, 198, 20);      // Vector 1 : roll ramp
+  const basket = Track('track2', 738.5, 669.5, 0);    // Vector 2 : catcher
+
+  // Sample the basket outline into a polyline collider. Balls collide against the
+  // nearest point on this line (normal taken from that point to the ball centre),
+  // which stays stable even at the sharp bottom of the bowl.
+  const WP = [];
+  for (let l = 0; l <= basket.total; l += 3) WP.push(basket.point(l));
+  let bottom = { x: 0, y: -1e9 }, rimY = 1e9;
+  for (const p of WP) { if (p.y > bottom.y) bottom = p; if (p.y < rimY) rimY = p; }
+  rimY = rimY.y;
+
+  // ---- physics constants ----
+  const G = 1500;          // gravity (px/s^2)
+  const DROP_H = 300;      // drop-in height above the ramp's top end
+  const ROLL_G = 1700, INERTIA = 5 / 7, FRICTION = 0.7;  // solid-sphere rolling on the ramp
+  const VS0 = 40, V_MIN = 24, V_MAX = 620;
+  const E_WALL = 0.2, MU_WALL = 0.2;     // basket wall bounciness / friction
+  const E_BALL = 0.18;                    // ball-to-ball bounciness
+  const DAMP = 0.9;                       // mild air drag so the pile comes to rest
+  const SLEEP = 7;                        // below this speed a ball is treated as still
+
+  function makeBall(el, delay) {
+    return { el, delay, state: 'wait', t: delay, x: 0, y: 0, l: 0, vs: 0, vx: 0, vy: 0, rot: 0,
+             tt: 0, tT: 0, p0: null, p1: null, p2: null };
+  }
+  const balls = [
+    makeBall(document.getElementById('b1'), 0.0),
+    makeBall(document.getElementById('b2'), 1.6),
+    makeBall(document.getElementById('b3'), 3.2),
+  ];
+
+  let resetting = false, holdT = 0, settleT = 0;
+
+  function draw(b) { b.el.style.transform = `translate(${b.x - R}px, ${b.y - R}px) rotate(${b.rot}deg)`; }
+
+  // ---- the ghost (circle 4): drifts around the viewport, fading in and out ----
+  const ghostEl = document.getElementById('b4');
+  let gt = 0;
+  function ghostStep(dt) {
+    gt += dt;
+    // smooth wandering (layered sines) roughly over the whole frame
+    const x = 960 + 620 * Math.sin(gt * 0.13) + 230 * Math.sin(gt * 0.071 + 1.7);
+    const y = 470 + 300 * Math.sin(gt * 0.107 + 2.3) + 150 * Math.sin(gt * 0.053 + 0.5);
+    // opacity wave, biased positive so the ghost is visible most of the time and
+    // only briefly fades out at the deepest troughs
+    let op = (Math.sin(gt * 0.45) + 0.5 * Math.sin(gt * 1.17 + 2.0) + 0.25 * Math.sin(gt * 2.3)) * 0.42 + 0.52;
+    op = op < 0 ? 0 : op > 0.78 ? 0.78 : op;
+    const sc = 0.9 + 0.12 * Math.sin(gt * 0.9 + 1);
+    const rot = 8 * Math.sin(gt * 0.3);
+    ghostEl.style.opacity = op.toFixed(3);
+    ghostEl.style.transform = `translate(${x - R}px, ${y - R}px) rotate(${rot}deg) scale(${sc})`;
+  }
+
+  function spawn(b) {
+    b.state = 'dropIn';
+    const c = ramp.center(0);        // top (right) end of the ramp
+    b.x = c.x; b.y = c.y - DROP_H; b.vy = 0; b.l = 0; b.vs = VS0;
+    b.el.style.opacity = '1';
+    draw(b);
+  }
+
+  // per-ball logic for everything EXCEPT the free-body phase (which the solver runs)
+  function step(b, dt) {
+    switch (b.state) {
+      case 'wait':
+        b.t -= dt; if (b.t <= 0) spawn(b); break;
+
+      case 'dropIn': {
+        const target = ramp.center(0).y;
+        b.vy += G * dt; b.y += b.vy * dt;
+        if (b.y >= target) { b.y = target; b.state = 'roll'; b.vs = Math.max(VS0, Math.min(V_MAX, b.vy * 0.5 + VS0)); }
+        draw(b); break;
+      }
+
+      case 'roll': {                  // real rolling: only downhill gravity drives it
+        const SUB = 5, h = dt / SUB;
+        for (let i = 0; i < SUB; i++) {
+          const sinSlope = ramp.tangent(b.l).y;
+          b.vs += (INERTIA * ROLL_G * sinSlope - FRICTION * b.vs) * h;
+          if (b.vs < V_MIN) b.vs = V_MIN;
+          if (b.vs > V_MAX) b.vs = V_MAX;
+          const ds = b.vs * h;
+          b.l += ds; b.rot -= (ds / R) * RAD2DEG;
+          if (b.l >= ramp.total) break;
+        }
+        if (b.l >= ramp.total) {       // leaves the ramp -> guided toss up to the basket mouth
+          const c = ramp.center(ramp.total);
+          b.x = c.x; b.y = c.y;
+          b.p0 = { x: c.x, y: c.y };
+          b.p2 = { x: bottom.x, y: rimY + 14 };                       // release just inside the rim, centred
+          b.p1 = { x: (c.x + bottom.x) / 2, y: Math.min(c.y, rimY) - 150 };  // arch over the gap
+          b.tT = Math.max(0.55, Math.min(0.9, Math.hypot(b.p2.x - c.x, b.p2.y - c.y) / 760));
+          b.tt = 0;
+          b.state = 'toss';
+        } else {
+          const c = ramp.center(b.l); b.x = c.x; b.y = c.y;
+        }
+        draw(b); break;
+      }
+
+      case 'toss': {                   // kinematic arc across the gap into the basket mouth
+        b.tt += dt;
+        const u = Math.min(b.tt / b.tT, 1), iu = 1 - u, px = b.x;
+        b.x = iu*iu*b.p0.x + 2*iu*u*b.p1.x + u*u*b.p2.x;
+        b.y = iu*iu*b.p0.y + 2*iu*u*b.p1.y + u*u*b.p2.y;
+        b.rot -= ((b.x - px) / R) * RAD2DEG;
+        if (u >= 1) {                  // hand momentum to the free-body solver
+          let vx = (2*(b.p2.x - b.p1.x)) / b.tT;
+          let vy = (2*(b.p2.y - b.p1.y)) / b.tT;
+          const sp = Math.hypot(vx, vy), cap = 420;
+          if (sp > cap) { vx = vx / sp * cap; vy = vy / sp * cap; }
+          b.vx = vx; b.vy = vy; b.state = 'phys';
+        }
+        draw(b); break;
+      }
+
+      // 'phys' is integrated by solvePhysics(); nothing to do here.
+    }
+  }
+
+  function wallCollide(b) {
+    // nearest point on the basket polyline (point-to-segment across all segments)
+    let cx = 0, cy = 0, best = Infinity;
+    for (let i = 0; i < WP.length - 1; i++) {
+      const ax = WP[i].x, ay = WP[i].y, ex = WP[i + 1].x - ax, ey = WP[i + 1].y - ay;
+      let t = ((b.x - ax) * ex + (b.y - ay) * ey) / (ex * ex + ey * ey || 1);
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const qx = ax + ex * t, qy = ay + ey * t, dx = b.x - qx, dy = b.y - qy, d = dx * dx + dy * dy;
+      if (d < best) { best = d; cx = qx; cy = qy; }
+    }
+    const d = Math.sqrt(best);
+    if (d < R) {                                   // touching the wall -> push out along the contact normal
+      const nx = d > 1e-3 ? (b.x - cx) / d : 0, ny = d > 1e-3 ? (b.y - cy) / d : -1;
+      b.x = cx + nx * R; b.y = cy + ny * R;
+      const vn = b.vx * nx + b.vy * ny;
+      if (vn < 0) { b.vx -= (1 + E_WALL) * vn * nx; b.vy -= (1 + E_WALL) * vn * ny; }   // bounce
+      const vn2 = b.vx * nx + b.vy * ny;                                                 // tangential friction
+      b.vx -= MU_WALL * (b.vx - vn2 * nx);
+      b.vy -= MU_WALL * (b.vy - vn2 * ny);
+    }
+  }
+
+  function ballCollide(a, b) {
+    let dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+    if (d > 0 && d < 2 * R) {
+      const nx = dx / d, ny = dy / d, overlap = (2 * R - d) / 2;
+      a.x -= nx * overlap; a.y -= ny * overlap;                   // separate equally
+      b.x += nx * overlap; b.y += ny * overlap;
+      const rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;         // approach speed along contact
+      if (rv < 0) {
+        const j = -(1 + E_BALL) * rv / 2;                         // equal-mass impulse
+        a.vx -= j * nx; a.vy -= j * ny;
+        b.vx += j * nx; b.vy += j * ny;
+      }
+    }
+  }
+
+  function solvePhysics(dt) {
+    const P = balls.filter(b => b.state === 'phys');
+    if (!P.length) return;
+    const SUB = 6, h = dt / SUB;
+    for (let s = 0; s < SUB; s++) {
+      for (const b of P) {                    // integrate + spin from horizontal motion
+        b.vy += G * h;
+        b.vx *= (1 - DAMP * h); b.vy *= (1 - DAMP * h);
+        b.x += b.vx * h; b.y += b.vy * h;
+        b.rot -= (b.vx * h / R) * RAD2DEG;
+      }
+      for (const b of P) wallCollide(b);
+      for (let i = 0; i < P.length; i++)
+        for (let j = i + 1; j < P.length; j++) ballCollide(P[i], P[j]);
+    }
+    for (const b of P) if (Math.hypot(b.vx, b.vy) < SLEEP) { b.vx = 0; b.vy = 0; }  // let them come to rest
+  }
+
+  function rearm() {                   // fade the caught circles out and start a new round
+    resetting = false; settleT = 0;
+    balls.forEach((b, i) => { b.el.style.opacity = '0'; b.state = 'wait'; b.t = 0.5 + i * 1.6; });
+  }
+
+  let last = null;
+  function frame(ts) {
+    if (last === null) last = ts;
+    let dt = (ts - last) / 1000; last = ts;
+    if (dt > 0.05) dt = 0.05;
+
+    for (const b of balls) if (b.state !== 'phys') step(b, dt);
+    solvePhysics(dt);
+    for (const b of balls) draw(b);
+    ghostStep(dt);
+
+    // once all three are in the basket and have come to rest, hold, then loop
+    const allIn = balls.every(b => b.state === 'phys');
+    const calm = balls.every(b => Math.hypot(b.vx, b.vy) < SLEEP);
+    if (!resetting) {
+      if (allIn && calm) { settleT += dt; if (settleT > 0.8) { resetting = true; holdT = 1.4; } }
+      else settleT = 0;
+    } else { holdT -= dt; if (holdT <= 0) rearm(); }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  function fit() {
+    document.documentElement.style.setProperty('--s', Math.min(window.innerWidth / 1920, window.innerHeight / 1080));
+  }
+  window.addEventListener('resize', fit); fit();
+})();
+</script>
+</body>
+</html>
