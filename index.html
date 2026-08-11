@@ -39,14 +39,26 @@
     transition: opacity .35s ease;
     box-shadow: 0 10px 22px rgba(0,0,0,0.55);
   }
-  #b1 { background-image: url('assets/circle1.png'); }
-  #b2 { background-image: url('assets/circle2.png'); }
-  #b3 { background-image: url('assets/circle3.png'); }
+  /* Inner layer carries the image + rolling spin; the outer .ball carries
+     position and the squash/stretch scale, so the two never fight. */
+  .ball-inner { position: absolute; inset: 0; border-radius: 50%; background-size: cover; background-position: center; will-change: transform; }
+  #b1 .ball-inner { background-image: url('assets/circle1.png'); }
+  #b2 .ball-inner { background-image: url('assets/circle2.png'); }
+  #b3 .ball-inner { background-image: url('assets/circle3.png'); }
   #b4 { background-image: url('assets/circle4.png'); }
 
   /* Circle 4 is a "ghost": it doesn't roll, it drifts and fades in/out. Its
      opacity/transform are driven every frame in JS, so no CSS transition here. */
   .ghost { transition: none; box-shadow: none; filter: blur(0.4px) drop-shadow(0 0 22px rgba(255,255,255,0.25)); }
+
+  /* Fading motion trail left behind fast-moving balls */
+  #trails { position: absolute; inset: 0; width: 1920px; height: 1080px; pointer-events: none; }
+  .trail {
+    position: absolute; width: 88px; height: 88px; border-radius: 50%;
+    background-size: cover; background-position: center; pointer-events: none;
+    opacity: 0.38; filter: blur(1px); animation: trailfade 0.42s ease-out forwards;
+  }
+  @keyframes trailfade { to { opacity: 0; transform: scale(0.6); } }
 </style>
 </head>
 <body>
@@ -60,9 +72,10 @@
       <path id="track2" class="track" transform="translate(738.5,669.5)"
         d="M 30 0 C 31.5 8 33.5 12.5 35 15.5 C 36.5 18.5 37 23.5 36 28.5 C 35 33.5 32.5 38 32.5 44.5 C 32.5 51 31 61.5 28 66.5 C 26.5 75.5 25.5 92 22.5 101 C 19.5 110 17.5 116.5 17.5 120.5 C 17.5 124.5 17 125.5 12.5 129.5 C 8.9 132.7 2.667 139.5 0 142.5 C 2.167 142.5 7.1 142.5 9.5 142.5 C 12.5 142.5 14.5 143 14 146.5 C 13.5 150 13 154.5 16.5 155 C 20 155.5 25 157 30.5 158 C 36 159 38 161 41 160.5 C 44 160 46.5 160 50.5 161.5 C 54.5 163 62.5 163.5 68.5 162.5 C 74.5 161.5 74 154.5 78 157 C 82 159.5 89.5 160 97 162.5 C 104.5 165 110.5 168.5 113.5 171.5 C 116.5 174.5 123.5 174 125 169.5 C 126.5 165 128.5 170 136 168.5 C 143.5 167 153 162.5 162 161.5 C 171 160.5 196 159.5 208.5 160 C 221 160.5 230 162 232.5 161 C 235 160 232.5 145 241 140.5 C 249.5 136 258.5 135.5 259 135.5 C 259.5 135.5 254 104 254.5 88.5 C 255 73 257.5 68.5 255 59.5 C 252.5 50.5 250 48 250.5 41 C 250.9 35.4 251.333 27.667 251.5 24.5" />
     </svg>
-    <div class="ball" id="b1"></div>
-    <div class="ball" id="b2"></div>
-    <div class="ball" id="b3"></div>
+    <div id="trails"></div>
+    <div class="ball" id="b1"><div class="ball-inner"></div></div>
+    <div class="ball" id="b2"><div class="ball-inner"></div></div>
+    <div class="ball" id="b3"><div class="ball-inner"></div></div>
     <div class="ball ghost" id="b4"></div>
   </div>
 
@@ -121,14 +134,18 @@
   const DROP_H = 300;      // drop-in height above the ramp's top end
   const ROLL_G = 1700, INERTIA = 5 / 7, FRICTION = 0.7;  // solid-sphere rolling on the ramp
   const VS0 = 40, V_MIN = 24, V_MAX = 620;
-  const E_WALL = 0.2, MU_WALL = 0.2;     // basket wall bounciness / friction
-  const E_BALL = 0.18;                    // ball-to-ball bounciness
+  const E_WALL = 0.3, MU_WALL = 0.2;     // basket wall bounciness / friction
+  const E_BALL = 0.34;                    // ball-to-ball bounciness
   const DAMP = 0.9;                       // mild air drag so the pile comes to rest
   const SLEEP = 7;                        // below this speed a ball is treated as still
+  const E_ROLL = 0.36, ROLL_HOP_MAX = 42; // slight hop while rolling over bumps
 
   function makeBall(el, delay) {
-    return { el, delay, state: 'wait', t: delay, x: 0, y: 0, l: 0, vs: 0, vx: 0, vy: 0, rot: 0,
-             tt: 0, tT: 0, p0: null, p1: null, p2: null };
+    const inner = el.querySelector('.ball-inner');
+    return { el, inner, img: inner ? getComputedStyle(inner).backgroundImage : '', delay,
+             state: 'wait', t: delay, x: 0, y: 0, l: 0, vs: 0, vx: 0, vy: 0, rot: 0,
+             h: 0, hv: 0, tt: 0, tT: 0, p0: null, p1: null, p2: null,
+             px: 0, py: 0, pspeed: 0, sq: 0, trailAcc: 0 };
   }
   const balls = [
     makeBall(document.getElementById('b1'), 0.0),
@@ -138,7 +155,43 @@
 
   let resetting = false, holdT = 0, settleT = 0;
 
-  function draw(b) { b.el.style.transform = `translate(${b.x - R}px, ${b.y - R}px) rotate(${b.rot}deg)`; }
+  const trailsLayer = document.getElementById('trails');
+  function spawnTrail(b) {
+    if (!b.img) return;
+    const t = document.createElement('div');
+    t.className = 'trail';
+    t.style.left = (b.x - R) + 'px';
+    t.style.top = (b.y - R) + 'px';
+    t.style.backgroundImage = b.img;
+    trailsLayer.appendChild(t);
+    t.addEventListener('animationend', () => t.remove());
+  }
+
+  // one render pass per frame: squash/stretch aligned to motion + a fading trail.
+  function render(b, dt) {
+    const mvx = b.x - b.px, mvy = b.y - b.py;
+    const vx = mvx / dt, vy = mvy / dt, speed = Math.hypot(vx, vy);
+    const drop = b.pspeed - speed;                       // sudden slow-down = an impact
+    if (drop > 150) b.sq = Math.min(1, b.sq + Math.min(1, drop / 500));
+    b.sq *= Math.max(0, 1 - 9 * dt);                     // squash pulse decays quickly
+    b.pspeed = speed;
+
+    const e = Math.min(0.26, speed / 2700);              // stretch grows with speed
+    const q = 0.42 * b.sq;                               // impact flattens it
+    let sx = 1 + e - q, sy = 1 - e + q;                  // area roughly preserved
+    sx = sx < 0.6 ? 0.6 : sx > 1.4 ? 1.4 : sx;
+    sy = sy < 0.6 ? 0.6 : sy > 1.4 ? 1.4 : sy;
+    const ma = Math.atan2(vy, vx) * RAD2DEG;             // deform along travel direction
+
+    b.el.style.transform =
+      `translate(${(b.x - R).toFixed(1)}px, ${(b.y - R).toFixed(1)}px) ` +
+      `rotate(${ma.toFixed(1)}deg) scale(${sx.toFixed(3)}, ${sy.toFixed(3)}) rotate(${(-ma).toFixed(1)}deg)`;
+    if (b.inner) b.inner.style.transform = `rotate(${b.rot.toFixed(1)}deg)`;
+
+    b.trailAcc += Math.hypot(mvx, mvy);
+    if (speed > 240 && b.trailAcc > 15) { b.trailAcc = 0; spawnTrail(b); }
+    b.px = b.x; b.py = b.y;
+  }
 
   // ---- the ghost (circle 4): drifts around the viewport, fading in and out ----
   const ghostEl = document.getElementById('b4');
@@ -161,9 +214,9 @@
   function spawn(b) {
     b.state = 'dropIn';
     const c = ramp.center(0);        // top (right) end of the ramp
-    b.x = c.x; b.y = c.y - DROP_H; b.vy = 0; b.l = 0; b.vs = VS0;
+    b.x = c.x; b.y = c.y - DROP_H; b.vy = 0; b.l = 0; b.vs = VS0; b.h = 0; b.hv = 0;
+    b.px = b.x; b.py = b.y; b.pspeed = 0; b.sq = 0;    // avoid a velocity spike on (re)spawn
     b.el.style.opacity = '1';
-    draw(b);
   }
 
   // per-ball logic for everything EXCEPT the free-body phase (which the solver runs)
@@ -175,34 +228,54 @@
       case 'dropIn': {
         const target = ramp.center(0).y;
         b.vy += G * dt; b.y += b.vy * dt;
-        if (b.y >= target) { b.y = target; b.state = 'roll'; b.vs = Math.max(VS0, Math.min(V_MAX, b.vy * 0.5 + VS0)); }
-        draw(b); break;
+        if (b.y >= target) {                     // lands on the ramp with a little bounce
+          b.y = target; b.state = 'roll';
+          b.vs = Math.max(VS0, Math.min(V_MAX, b.vy * 0.5 + VS0));
+          b.h = 0; b.hv = Math.min(0.3 * b.vy, 240);
+        }
+        break;
       }
 
       case 'roll': {                  // real rolling: only downhill gravity drives it
-        const SUB = 5, h = dt / SUB;
+        const SUB = 5, hs = dt / SUB;
         for (let i = 0; i < SUB; i++) {
           const sinSlope = ramp.tangent(b.l).y;
-          b.vs += (INERTIA * ROLL_G * sinSlope - FRICTION * b.vs) * h;
+          b.vs += (INERTIA * ROLL_G * sinSlope - FRICTION * b.vs) * hs;
           if (b.vs < V_MIN) b.vs = V_MIN;
           if (b.vs > V_MAX) b.vs = V_MAX;
-          const ds = b.vs * h;
+          const ds = b.vs * hs;
           b.l += ds; b.rot -= (ds / R) * RAD2DEG;
+
+          // slight bounce: on the ground a fast ball gets thrown up by convex bumps
+          // (centripetal lift ∝ speed²·curvature), then falls back and bounces.
+          let aLift = 0;
+          if (b.h < 0.5) {
+            const t1 = ramp.tangent(b.l - 5), t2 = ramp.tangent(b.l + 5);
+            const kappa = (t1.x * t2.y - t1.y * t2.x) / 10;   // signed path curvature
+            aLift = b.vs * b.vs * kappa;
+            if (aLift < 0) aLift = 0;                          // dips are held by the surface, not sucked down
+          }
+          b.hv += (aLift - G) * hs;
+          b.h += b.hv * hs;
+          if (b.h <= 0) { b.h = 0; if (b.hv < 0) b.hv = -b.hv * E_ROLL; if (Math.abs(b.hv) < 25) b.hv = 0; }
+          else if (b.h > ROLL_HOP_MAX) { b.h = ROLL_HOP_MAX; if (b.hv > 0) b.hv = 0; }
+
           if (b.l >= ramp.total) break;
         }
         if (b.l >= ramp.total) {       // leaves the ramp -> guided toss up to the basket mouth
           const c = ramp.center(ramp.total);
-          b.x = c.x; b.y = c.y;
+          b.x = c.x; b.y = c.y; b.h = 0; b.hv = 0;
           b.p0 = { x: c.x, y: c.y };
           b.p2 = { x: bottom.x, y: rimY + 14 };                       // release just inside the rim, centred
           b.p1 = { x: (c.x + bottom.x) / 2, y: Math.min(c.y, rimY) - 150 };  // arch over the gap
           b.tT = Math.max(0.55, Math.min(0.9, Math.hypot(b.p2.x - c.x, b.p2.y - c.y) / 760));
           b.tt = 0;
           b.state = 'toss';
-        } else {
-          const c = ramp.center(b.l); b.x = c.x; b.y = c.y;
+        } else {                       // sit on the ramp, lifted by the current hop height
+          const p = ramp.point(b.l), n = ramp.normalUp(b.l);
+          b.x = p.x + n.x * (R + b.h); b.y = p.y + n.y * (R + b.h);
         }
-        draw(b); break;
+        break;
       }
 
       case 'toss': {                   // kinematic arc across the gap into the basket mouth
@@ -218,7 +291,7 @@
           if (sp > cap) { vx = vx / sp * cap; vy = vy / sp * cap; }
           b.vx = vx; b.vy = vy; b.state = 'phys';
         }
-        draw(b); break;
+        break;
       }
 
       // 'phys' is integrated by solvePhysics(); nothing to do here.
@@ -290,10 +363,11 @@
     if (last === null) last = ts;
     let dt = (ts - last) / 1000; last = ts;
     if (dt > 0.05) dt = 0.05;
+    if (dt < 1e-4) dt = 1e-4;
 
     for (const b of balls) if (b.state !== 'phys') step(b, dt);
     solvePhysics(dt);
-    for (const b of balls) draw(b);
+    for (const b of balls) render(b, dt);
     ghostStep(dt);
 
     // once all three are in the basket and have come to rest, hold, then loop
